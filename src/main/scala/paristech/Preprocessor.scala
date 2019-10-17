@@ -30,6 +30,7 @@ object Preprocessor {
       .config(conf)
       .appName("TP Spark : Preprocessor")
       .getOrCreate()
+
     import spark.implicits._
 
     /*******************************************************************************
@@ -44,30 +45,32 @@ object Preprocessor {
       *
       ********************************************************************************/
 
-
+    // Load data
     val df: DataFrame = spark
       .read
       .option("header", true) // utilise la première ligne du (des) fichier(s) comme header
       .option("inferSchema", "true") // pour inférer le type de chaque colonne (Int, String, etc.)
       .csv("/Users/jeremieperes/MS Big data Télécom/P1/INF729 - Hadoop et Spark/Spark/spark_project_kickstarter_2019_2020/data/train_clean.csv")
 
+    // Show dataframe and some insights
     println(s"Nombre de lignes : ${df.count}")
     println(s"Nombre de colonnes : ${df.columns.length}")
-
     df.show(10)
-
     df.printSchema
 
+    // Cast numeric columns to Int
     val dfCasted: DataFrame = df
       .withColumn("goal", $"goal".cast("Int"))
       .withColumn("backers_count", $"backers_count".cast("Int"))
       .withColumn("final_status", $"final_status".cast("Int"))
 
+    // Get a statistical summary on Int columns
     dfCasted
       .select("goal", "backers_count", "final_status")
       .describe()
       .show
 
+    // Look for data to clean
     dfCasted.groupBy("disable_communication").count.orderBy($"count".desc).show(100)
     dfCasted.groupBy("country").count.orderBy($"count".desc).show(100)
     dfCasted.groupBy("currency").count.orderBy($"count".desc).show(100)
@@ -77,10 +80,13 @@ object Preprocessor {
     dfCasted.select("goal", "final_status").show(30)
     dfCasted.groupBy("country", "currency").count.orderBy($"count".desc).show(50)
 
+    // Drop column disable_communication because it is almost always the same value
     val df2: DataFrame = dfCasted.drop("disable_communication")
 
+    // Drop columns which cannot be known until the end of a campaign
     val dfNoFutur : DataFrame = df2.drop("backers_count","state_changed_at")
 
+    // Create an UDF to clean the column country
     def cleanCountry(country: String, currency: String): String = {
       if (country == null)
         currency
@@ -89,26 +95,24 @@ object Preprocessor {
       else
         country
     }
+    val cleanCountryUdf = udf(cleanCountry _)
 
+    // Create an UDF to clean the column currency
     def cleanCurrency(currency:String): String = {
       if (currency.length != 3)
         null
       else
         currency
     }
-
-    val cleanCountryUdf = udf(cleanCountry _)
     val cleanCurrencyUdf = udf(cleanCurrency _)
 
+    // Clean columns country and currency by creating new ones and dropping old ones
     val dfCountryCurrency = dfNoFutur
       .withColumn("country2",cleanCountryUdf($"country",$"currency"))
       .withColumn("currency2",cleanCurrencyUdf($"currency"))
       .drop("country","currency")
 
-    dfCountryCurrency.show
-
-    dfCountryCurrency.groupBy("final_status").count.orderBy($"count".desc).show(100)
-
+    // Clean all other columns
     val dfCleaned = dfCountryCurrency.filter($"final_status"===0 || $"final_status"===1)
       .withColumn("days_campaign",datediff(from_unixtime($"deadline"),from_unixtime($"launched_at")))
       .withColumn("launched_at",$"launched_at".cast("Float"))
@@ -121,9 +125,10 @@ object Preprocessor {
       .withColumn("text",concat_ws(" ",$"name",$"desc",$"keywords"))
       .na.fill(Map("days_campaign" -> -1, "hours_prepa" -> -1,"goal" -> -1,"country2" -> "unknown","currency2" -> "unknown"))
 
-
+    // Show final Dataframe
     dfCleaned.show(20)
 
+    // Export the final Dataframe to parquet files
     dfCleaned.write.parquet("/Users/jeremieperes/MS Big data Télécom/P1/INF729 - Hadoop et Spark/Spark/spark_project_kickstarter_2019_2020/data/out")
 
   }
