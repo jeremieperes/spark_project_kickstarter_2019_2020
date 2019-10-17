@@ -2,10 +2,11 @@ package paristech
 
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.{DataFrame, SparkSession}
-import org.apache.spark.sql.functions.udf
+import org.apache.spark.sql.functions._
 
 
 object Preprocessor {
+
 
   def main(args: Array[String]): Unit = {
 
@@ -29,7 +30,6 @@ object Preprocessor {
       .config(conf)
       .appName("TP Spark : Preprocessor")
       .getOrCreate()
-
     import spark.implicits._
 
     /*******************************************************************************
@@ -49,7 +49,7 @@ object Preprocessor {
       .read
       .option("header", true) // utilise la première ligne du (des) fichier(s) comme header
       .option("inferSchema", "true") // pour inférer le type de chaque colonne (Int, String, etc.)
-      .csv("/Users/jeremieperes/MS Big data Télécom/P1/INF729 - Hadoop et Spark/Spark/cours-spark-telecom/data/train_clean.csv")
+      .csv("/Users/jeremieperes/MS Big data Télécom/P1/INF729 - Hadoop et Spark/Spark/spark_project_kickstarter_2019_2020/data/train_clean.csv")
 
     println(s"Nombre de lignes : ${df.count}")
     println(s"Nombre de colonnes : ${df.columns.length}")
@@ -59,13 +59,23 @@ object Preprocessor {
     df.printSchema
 
     val dfCasted: DataFrame = df
-      .withColumn("goal", $"goal".cast("Float"))
-      .withColumn("deadline" , $"deadline".cast("Int"))
-      .withColumn("state_changed_at", $"state_changed_at".cast("Int"))
-      .withColumn("created_at", $"created_at".cast("Int"))
-      .withColumn("launched_at", $"launched_at".cast("Int"))
+      .withColumn("goal", $"goal".cast("Int"))
       .withColumn("backers_count", $"backers_count".cast("Int"))
       .withColumn("final_status", $"final_status".cast("Int"))
+
+    dfCasted
+      .select("goal", "backers_count", "final_status")
+      .describe()
+      .show
+
+    dfCasted.groupBy("disable_communication").count.orderBy($"count".desc).show(100)
+    dfCasted.groupBy("country").count.orderBy($"count".desc).show(100)
+    dfCasted.groupBy("currency").count.orderBy($"count".desc).show(100)
+    dfCasted.select("deadline").dropDuplicates.show()
+    dfCasted.groupBy("state_changed_at").count.orderBy($"count".desc).show(100)
+    dfCasted.groupBy("backers_count").count.orderBy($"count".desc).show(100)
+    dfCasted.select("goal", "final_status").show(30)
+    dfCasted.groupBy("country", "currency").count.orderBy($"count".desc).show(50)
 
     val df2: DataFrame = dfCasted.drop("disable_communication")
 
@@ -90,15 +100,31 @@ object Preprocessor {
     val cleanCountryUdf = udf(cleanCountry _)
     val cleanCurrencyUdf = udf(cleanCurrency _)
 
-    val dfCleaned = dfNoFutur
+    val dfCountryCurrency = dfNoFutur
       .withColumn("country2",cleanCountryUdf($"country",$"currency"))
       .withColumn("currency2",cleanCurrencyUdf($"currency"))
       .drop("country","currency")
 
-    dfCleaned.show
+    dfCountryCurrency.show
 
-    println(s"Nombre de lignes : ${dfCleaned.count}")
-    println(s"Nombre de colonnes : ${dfCleaned.columns.length}")
+    dfCountryCurrency.groupBy("final_status").count.orderBy($"count".desc).show(100)
+
+    val dfCleaned = dfCountryCurrency.filter($"final_status"===0 || $"final_status"===1)
+      .withColumn("days_campaign",datediff(from_unixtime($"deadline"),from_unixtime($"launched_at")))
+      .withColumn("launched_at",$"launched_at".cast("Float"))
+      .withColumn("created_at",$"created_at".cast("Float"))
+      .withColumn("hours_prepa",round(($"launched_at"-$"created_at")/3600,3))
+      .drop("launched_at","deadline","created_at")
+      .withColumn("name",lower($"name"))
+      .withColumn("desc",lower($"desc"))
+      .withColumn("keywords",lower($"keywords"))
+      .withColumn("text",concat_ws(" ",$"name",$"desc",$"keywords"))
+      .na.fill(Map("days_campaign" -> -1, "hours_prepa" -> -1,"goal" -> -1,"country2" -> "unknown","currency2" -> "unknown"))
+
+
+    dfCleaned.show(20)
+
+    dfCleaned.write.parquet("/Users/jeremieperes/MS Big data Télécom/P1/INF729 - Hadoop et Spark/Spark/spark_project_kickstarter_2019_2020/data/out")
 
   }
 }
