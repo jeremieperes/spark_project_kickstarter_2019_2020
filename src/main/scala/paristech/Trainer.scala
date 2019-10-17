@@ -1,7 +1,8 @@
 package paristech
 
 import org.apache.spark.SparkConf
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.ml.feature.RegexTokenizer
+import org.apache.spark.sql.{DataFrame, SparkSession}
 
 
 object Trainer {
@@ -25,6 +26,7 @@ object Trainer {
       .config(conf)
       .appName("TP Spark : Trainer")
       .getOrCreate()
+    import spark.implicits._
 
 
     /*******************************************************************************
@@ -40,7 +42,27 @@ object Trainer {
       *
       ********************************************************************************/
 
-    println("hello world ! from Trainer")
+    // Load data
+
+    val df: DataFrame = spark
+      .read
+      .option("inferSchema", "true") // pour inférer le type de chaque colonne (Int, String, etc.)
+      .parquet("/Users/jeremieperes/MS Big data Télécom/P1/INF729 - Hadoop et Spark/Spark/spark_project_kickstarter_2019_2020/data/prepared_trainingset/")
+
+
+    // Stage 1
+
+    val tokenizer = new RegexTokenizer()
+      .setPattern("\\W+")
+      .setGaps(true)
+      .setInputCol("text")
+      .setOutputCol("tokens")
+
+    df.show(5)
+
+    // Stage 2
+
+
 
   }
 }
