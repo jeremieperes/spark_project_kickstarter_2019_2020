@@ -106,7 +106,7 @@ object Preprocessor {
     }
     val cleanCurrencyUdf = udf(cleanCurrency _)
 
-    // Clean columns country and currency by creating new ones and dropping old ones
+    // Clean columns country and currency by creating new ones with UDFs previously created and dropping old ones
     val dfCountryCurrency = dfNoFutur
       .withColumn("country2",cleanCountryUdf($"country",$"currency"))
       .withColumn("currency2",cleanCurrencyUdf($"currency"))

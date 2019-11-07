@@ -1,8 +1,14 @@
 package paristech
 
 import org.apache.spark.SparkConf
-import org.apache.spark.ml.feature.RegexTokenizer
 import org.apache.spark.sql.{DataFrame, SparkSession}
+import org.apache.spark.ml.feature.{CountVectorizer, CountVectorizerModel, HashingTF, IDF, OneHotEncoderEstimator, RegexTokenizer, StopWordsRemover, StringIndexer, Tokenizer, VectorAssembler}
+import org.apache.spark.ml.linalg.Vectors
+import org.apache.spark.ml.evaluation.MulticlassClassificationEvaluator
+import org.apache.spark.sql.functions._
+import org.apache.spark.ml.{Pipeline, PipelineStage}
+import org.apache.spark.ml.classification.{LogisticRegression, LogisticRegressionModel}
+import org.apache.spark.ml.tuning.{CrossValidator, ParamGridBuilder}
 
 
 object Trainer {
@@ -43,26 +49,131 @@ object Trainer {
       ********************************************************************************/
 
     // Load data
-
     val df: DataFrame = spark
       .read
       .option("inferSchema", "true") // pour inférer le type de chaque colonne (Int, String, etc.)
-      .parquet("/Users/jeremieperes/MS Big data Télécom/P1/INF729 - Hadoop et Spark/Spark/spark_project_kickstarter_2019_2020/data/prepared_trainingset/")
+      .parquet("/Users/jeremieperes/MS_Big_data_Telecom/P1/INF729_Hadoop_Spark/Spark/spark_project_kickstarter_2019_2020/data/prepared_trainingset")
 
+    df.show(5)
 
-    // Stage 1
+    df.printSchema
 
+    // Stage 1 : Get words
     val tokenizer = new RegexTokenizer()
       .setPattern("\\W+")
       .setGaps(true)
       .setInputCol("text")
       .setOutputCol("tokens")
 
-    df.show(5)
+    // Stage 2 : Remove stop words
+    val remover = new StopWordsRemover()
+      .setInputCol(tokenizer.getOutputCol)
+      .setOutputCol("words")
 
-    // Stage 2
+    // Stage 3 : TF
+    val vectorizer = new CountVectorizer()
+      .setInputCol(remover.getOutputCol)
+      .setOutputCol("rawFeatures")
+
+    // Stage 4 : IDF
+    val idf = new IDF()
+      .setInputCol(vectorizer.getOutputCol)
+      .setOutputCol("tfidf")
+
+    // Stage 5 : convert country2
+    val countryIndexer = new StringIndexer()
+      .setInputCol("country2")
+      .setOutputCol("country_indexed")
+      .setHandleInvalid("keep")
+
+    // Stage 6 : convert currency2
+    val currencyIndexer = new StringIndexer()
+      .setInputCol("currency2")
+      .setOutputCol("currency_indexed")
+
+    // Stage 7-8 : One-Hot encoding for country and currency
+    val encoder = new OneHotEncoderEstimator()
+      .setInputCols(Array(countryIndexer.getOutputCol, currencyIndexer.getOutputCol))
+      .setOutputCols(Array("country_onehot", "currency_onehot"))
 
 
+    // Stage 9 : Vector features assembler
+    val assembler = new VectorAssembler()
+      .setInputCols(Array("tfidf", "days_campaign", "hours_prepa", "goal", "country_onehot", "currency_onehot"))
+      .setOutputCol("features")
 
+    // Stage 10 : Classification model - Logistic Regression
+    val lr = new LogisticRegression()
+      .setElasticNetParam(0.0)
+      .setFitIntercept(true)
+      .setFeaturesCol("features")
+      .setLabelCol("final_status")
+      .setStandardization(true)
+      .setPredictionCol("predictions")
+      .setRawPredictionCol("raw_predictions")
+      .setThresholds(Array(0.7, 0.3))
+      .setTol(1.0e-6)
+      .setMaxIter(20)
+
+    // Pipeline creation
+    val pipeline = new Pipeline()
+      .setStages(Array(tokenizer,remover,vectorizer,idf,countryIndexer,currencyIndexer,encoder,assembler,lr))
+
+    // Data splitting
+    val Array(trainingData, testData) = df.randomSplit(Array(0.9, 0.1),42)
+
+    // Training model
+    val model = pipeline.fit(trainingData)
+
+    // Make predictions
+    val dfWithSimplePredictions = model.transform(testData)
+
+    dfWithSimplePredictions.groupBy("final_status", "predictions").count.show()
+
+    // Evaluate the model
+    val evaluator = new MulticlassClassificationEvaluator()
+      .setLabelCol("final_status")
+      .setPredictionCol("predictions")
+      .setMetricName("f1")
+
+    val f1 = evaluator.evaluate(dfWithSimplePredictions)
+    println("F1 score :" + f1)
+
+
+    // Trying to find the best hyperparameters
+
+    // Building a param grid on different values of regParam
+    val paramGrid = new ParamGridBuilder()
+      .addGrid(lr.regParam, Array(10e-8,10e-6,10e-4,10e-2))
+      .addGrid(vectorizer.minDF, Array(55.0,75.0,95.0))
+      .build()
+
+    // Cross validation
+    val cv = new CrossValidator()
+      .setEstimator(pipeline)
+      .setEvaluator(evaluator)
+      .setEstimatorParamMaps(paramGrid)
+      .setNumFolds(5)
+
+    // Training model
+    val cvModel = cv.fit(trainingData)
+
+    // Make predictions
+    val dfWithPredictions = cvModel.transform(testData)
+
+    dfWithPredictions.groupBy("final_status", "predictions").count.show()
+
+    // Evaluate the model
+    val cvEvaluator = new MulticlassClassificationEvaluator()
+      .setLabelCol("final_status")
+      .setPredictionCol("predictions")
+      .setMetricName("f1")
+
+    val cvF1 = cvEvaluator.evaluate(dfWithSimplePredictions)
+    println("New F1 score :" + cvF1)
+
+    // Saving the model
+    cvModel.write.overwrite().save("/Users/jeremieperes/MS_Big_data_Telecom/P1/" +
+      "INF729_Hadoop_Spark/Spark/spark_project_kickstarter_2019_2020/model")
   }
 }
