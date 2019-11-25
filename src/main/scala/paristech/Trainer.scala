@@ -7,7 +7,7 @@ import org.apache.spark.ml.linalg.Vectors
 import org.apache.spark.ml.evaluation.MulticlassClassificationEvaluator
 import org.apache.spark.sql.functions._
 import org.apache.spark.ml.{Pipeline, PipelineStage}
-import org.apache.spark.ml.classification.{LogisticRegression, LogisticRegressionModel}
+import org.apache.spark.ml.classification.{LogisticRegression, LogisticRegressionModel,RandomForestClassificationModel, RandomForestClassifier}
 import org.apache.spark.ml.tuning.{CrossValidator, ParamGridBuilder}
 
 
@@ -105,6 +105,8 @@ object Trainer {
       .setOutputCol("features")
 
     // Stage 10 : Classification model - Logistic Regression
+    println("Training a Logistic Regression model")
+
     val lr = new LogisticRegression()
       .setElasticNetParam(0.0)
       .setFitIntercept(true)
@@ -138,12 +140,41 @@ object Trainer {
       .setPredictionCol("predictions")
       .setMetricName("f1")
 
+    // Check F1 score
     val f1 = evaluator.evaluate(dfWithSimplePredictions)
-    println("F1 score :" + f1)
+    println("F1 score with Logistic Regression:" + f1)
 
+    //  Classification model - Random Forest
+    println("Training a Random Forest model")
 
-    // Trying to find the best hyperparameters
+    val rf = new RandomForestClassifier()
+      .setFeaturesCol("features")
+      .setLabelCol("final_status")
+      .setPredictionCol("predictions")
+      .setRawPredictionCol("raw_predictions")
 
+    val rfPipeline = new Pipeline()
+      .setStages(Array(tokenizer,remover,vectorizer,idf,countryIndexer,currencyIndexer,encoder,assembler,rf))
+    // Training model
+    val rfModel = rfPipeline.fit(trainingData)
+
+    // Make predictions
+    val dfWithPredictionsRf = rfModel.transform(testData)
+
+    dfWithPredictionsRf.groupBy("final_status", "predictions").count.show()
+
+    // Evaluate the model
+    val rfEvaluator = new MulticlassClassificationEvaluator()
+      .setLabelCol("final_status")
+      .setPredictionCol("predictions")
+      .setMetricName("f1")
+
+    // Check F1 score
+    val rfF1 = rfEvaluator.evaluate(dfWithPredictionsRf)
+    println("F1 score with Random Forest :" + rfF1)
+
+    // Trying to find the best hyperparameters on Logistic Regression
+    println("Cross validation on Logistic Regression")
     // Building a param grid on different values of regParam
     val paramGrid = new ParamGridBuilder()
       .addGrid(lr.regParam, Array(10e-8,10e-6,10e-4,10e-2))
@@ -161,9 +192,9 @@ object Trainer {
     val cvModel = cv.fit(trainingData)
 
     // Make predictions
-    val dfWithPredictions = cvModel.transform(testData)
+    val dfWithPredictionsCv = cvModel.transform(testData)
 
-    dfWithPredictions.groupBy("final_status", "predictions").count.show()
+    dfWithPredictionsCv.groupBy("final_status", "predictions").count.show()
 
     // Evaluate the model
     val cvEvaluator = new MulticlassClassificationEvaluator()
@@ -171,10 +202,12 @@ object Trainer {
       .setPredictionCol("predictions")
       .setMetricName("f1")
 
-    val cvF1 = cvEvaluator.evaluate(dfWithSimplePredictions)
-    println("New F1 score :" + cvF1)
+    val cvF1 = cvEvaluator.evaluate(dfWithPredictionsCv)
+    println("F1 score with Logistic Regression + Cross Validation :" + cvF1)
 
-    // Saving the model
+    // Saving the best model (ie Logistic Regression with Cross validation)
     cvModel.write.overwrite().save(path + "/model")
+
+
   }
 }
