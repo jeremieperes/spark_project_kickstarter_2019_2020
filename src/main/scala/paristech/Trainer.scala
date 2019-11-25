@@ -49,10 +49,12 @@ object Trainer {
       ********************************************************************************/
 
     // Load data
+    val path = System.getProperty("user.dir")
+
     val df: DataFrame = spark
       .read
       .option("inferSchema", "true") // pour inférer le type de chaque colonne (Int, String, etc.)
-      .parquet("/Users/jeremieperes/MS_Big_data_Telecom/P1/INF729_Hadoop_Spark/Spark/spark_project_kickstarter_2019_2020/data/prepared_trainingset")
+      .parquet(path + "/data/prepared_trainingset")
 
     df.show(5)
 
@@ -173,7 +175,6 @@ object Trainer {
     println("New F1 score :" + cvF1)
 
     // Saving the model
-    cvModel.write.overwrite().save("/Users/jeremieperes/MS_Big_data_Telecom/P1/" +
-      "INF729_Hadoop_Spark/Spark/spark_project_kickstarter_2019_2020/model")
+    cvModel.write.overwrite().save(path + "/model")
   }
 }

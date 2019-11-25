@@ -46,11 +46,13 @@ object Preprocessor {
       ********************************************************************************/
 
     // Load data
+    val path = System.getProperty("user.dir")
+
     val df: DataFrame = spark
       .read
       .option("header", true) // utilise la première ligne du (des) fichier(s) comme header
       .option("inferSchema", "true") // pour inférer le type de chaque colonne (Int, String, etc.)
-      .csv("/Users/jeremieperes/MS Big data Télécom/P1/INF729 - Hadoop et Spark/Spark/spark_project_kickstarter_2019_2020/data/train_clean.csv")
+      .csv(path + "/data/train_clean.csv")
 
     // Show dataframe and some insights
     println(s"Nombre de lignes : ${df.count}")
@@ -129,7 +131,7 @@ object Preprocessor {
     dfCleaned.show(20)
 
     // Export the final Dataframe to parquet files
-    dfCleaned.write.parquet("/Users/jeremieperes/MS Big data Télécom/P1/INF729 - Hadoop et Spark/Spark/spark_project_kickstarter_2019_2020/data/out")
+    dfCleaned.write.mode("overwrite").parquet(path + "/data/out")
 
   }
 }
